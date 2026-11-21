@@ -1,7 +1,10 @@
-// Bundles the language server into one CommonJS file that the Zed extension embeds
-// (include_str! in ../src/lib.rs) and writes to its work directory at runtime.
-// The bundle is committed: Zed builds extensions with cargo only.
+// Bundles the language server into one CommonJS file: dist/blade-html-server.cjs. The release
+// workflow attaches it to the GitHub release `v<version>`, which the Zed extension downloads
+// (../src/lib.rs). CommonJS (.cjs) runs regardless of the nearest package.json "type".
+import * as fs from 'node:fs';
 import { build } from 'esbuild';
+
+const { version } = JSON.parse(fs.readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 await build({
   entryPoints: ['src/server.ts'],
@@ -12,6 +15,7 @@ await build({
   mainFields: ['module', 'main'],
   format: 'cjs',
   target: 'node20',
+  define: { BLADE_HTML_VERSION: JSON.stringify(version) },
   minifyWhitespace: true,
   minifySyntax: true,
   legalComments: 'eof',

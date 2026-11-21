@@ -1,5 +1,5 @@
-id = "blade-html"
-name = "Blade HTML"
+id = "blade-html-lsp"
+name = "Blade HTML LSP"
 version = "0.1.0"
 schema_version = 1
 authors = ["Dmitry Skibitsky"]
@@ -8,6 +8,7 @@ repository = "https://github.com/DmitrySkibitsky/zed-blade-html"
 
 # Runs next to the servers the `blade` extension and others register for Blade (devsense,
 # laravel, emmet…): Zed merges completions, hovers and definitions from all of them.
+# The server itself is downloaded from this repository's GitHub release of the same version.
 [language_servers.blade-html]
 name = "Blade HTML"
 languages = ["Blade"]

@@ -15,6 +15,10 @@ import { URI } from 'vscode-uri';
 import { Project, parseSettings, type Settings } from './project.ts';
 import { BladeHtmlService } from './service.ts';
 
+/** Replaced by esbuild with server/package.json "version"; unset when run from source (tests). */
+declare const BLADE_HTML_VERSION: string | undefined;
+const SERVER_VERSION = typeof BLADE_HTML_VERSION === 'string' ? BLADE_HTML_VERSION : 'dev';
+
 const connection = createConnection(ProposedFeatures.all);
 const documents = new TextDocuments(TextDocument);
 const service = new BladeHtmlService();
@@ -78,7 +82,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       documentHighlightProvider: true,
       workspace: { workspaceFolders: { supported: true, changeNotifications: true } },
     },
-    serverInfo: { name: 'blade-html', version: '0.1.0' },
+    serverInfo: { name: 'blade-html', version: SERVER_VERSION },
   };
 });
 

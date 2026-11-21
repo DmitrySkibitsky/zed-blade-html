@@ -1,51 +1,92 @@
 //! Zed extension: starts the `blade-html` language server for Blade files.
 //!
-//! The server (TypeScript, bundled by `server/build.mjs`) is embedded in the extension and written
-//! to the extension's work directory on first start, then run with the Node.js that Zed manages:
-//! no download, no npm install at runtime.
+//! The server (TypeScript, bundled into one `CommonJS` file by `server/build.mjs`) is attached to the
+//! GitHub release of the same version as the extension (`v<version>`, see
+//! `.github/workflows/release.yml`). It is downloaded into the extension's work directory on first
+//! start and run with the Node.js that Zed manages; extension and server versions always match.
 //!
-//! `lsp.blade-html.binary` in Zed settings overrides the command (e.g. to run a development build
-//! of the server); `lsp.blade-html.settings` / `initialization_options` are passed through.
+//! `lsp.blade-html.binary` in Zed settings overrides the command: `path` (+ `arguments`) runs any
+//! binary, `arguments` alone runs Zed's Node.js with them (e.g. a local
+//! `server/dist/blade-html-server.cjs` while developing). `lsp.blade-html.settings` /
+//! `initialization_options` are passed through to the server.
 
 use std::fs;
 
-use zed_extension_api::{self as zed, LanguageServerId, Result, serde_json, settings::LspSettings};
+use zed_extension_api::{
+    self as zed, DownloadedFileType, GithubReleaseAsset, LanguageServerId,
+    LanguageServerInstallationStatus, Result, serde_json,
+    settings::{CommandSettings, LspSettings},
+};
 
-/// The bundled language server (`server/dist/blade-html-server.cjs`, committed).
-const SERVER_SOURCE: &str = include_str!("../server/dist/blade-html-server.cjs");
-const SERVER_FILE_PREFIX: &str = "blade-html-server-";
+const REPOSITORY: &str = "DmitrySkibitsky/zed-blade-html";
+const SERVER_ASSET: &str = "blade-html-server.cjs";
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const SERVER_DIR_PREFIX: &str = "server-v";
 
 struct BladeHtmlExtension {
-    /// Absolute path of the server script written to the work directory.
+    /// Absolute path of the downloaded server script.
     server_path: Option<String>,
 }
 
 impl BladeHtmlExtension {
-    /// Writes the embedded server once per content version and returns its absolute path.
-    fn server_script(&mut self) -> Result<String> {
+    /// The server script of this extension version, downloaded on first use.
+    fn server_script(&mut self, language_server_id: &LanguageServerId) -> Result<String> {
         if let Some(path) = &self.server_path
-            && fs::metadata(path).is_ok()
+            && fs::metadata(path).is_ok_and(|m| m.is_file())
         {
             return Ok(path.clone());
         }
 
-        let file_name = server_file_name(SERVER_SOURCE);
-        let up_to_date =
-            fs::metadata(&file_name).is_ok_and(|m| m.len() == SERVER_SOURCE.len() as u64);
-        if !up_to_date {
-            fs::write(&file_name, SERVER_SOURCE)
-                .map_err(|e| format!("failed to write {file_name}: {e}"))?;
+        let dir = server_dir();
+        let path = format!("{dir}/{SERVER_ASSET}");
+        if !fs::metadata(&path).is_ok_and(|m| m.is_file()) {
+            if let Err(error) = download_server(language_server_id, &dir, &path) {
+                zed::set_language_server_installation_status(
+                    language_server_id,
+                    &LanguageServerInstallationStatus::Failed(error.clone()),
+                );
+                return Err(error);
+            }
+            remove_stale_servers(&dir);
         }
-        remove_stale_servers(&file_name);
 
         let path = std::env::current_dir()
             .map_err(|e| format!("failed to resolve the extension work directory: {e}"))?
-            .join(&file_name)
+            .join(&path)
             .to_string_lossy()
             .into_owned();
         self.server_path = Some(path.clone());
         Ok(path)
     }
+}
+
+fn download_server(language_server_id: &LanguageServerId, dir: &str, path: &str) -> Result<()> {
+    zed::set_language_server_installation_status(
+        language_server_id,
+        &LanguageServerInstallationStatus::CheckingForUpdate,
+    );
+    let tag = release_tag();
+    let release = zed::github_release_by_tag_name(REPOSITORY, &tag).map_err(|e| {
+        format!(
+            "blade-html: release {tag} of {REPOSITORY} not found ({e}). To run a local server \
+             build, set lsp.blade-html.binary.arguments in Zed settings."
+        )
+    })?;
+    let asset = find_server_asset(&release.assets)
+        .ok_or_else(|| format!("blade-html: release {tag} has no {SERVER_ASSET} asset"))?;
+
+    zed::set_language_server_installation_status(
+        language_server_id,
+        &LanguageServerInstallationStatus::Downloading,
+    );
+    fs::create_dir_all(dir).map_err(|e| format!("failed to create {dir}: {e}"))?;
+    zed::download_file(&asset.download_url, path, DownloadedFileType::Uncompressed)
+        .map_err(|e| format!("blade-html: failed to download {SERVER_ASSET}: {e}"))?;
+    zed::set_language_server_installation_status(
+        language_server_id,
+        &LanguageServerInstallationStatus::None,
+    );
+    Ok(())
 }
 
 impl zed::Extension for BladeHtmlExtension {
@@ -61,23 +102,36 @@ impl zed::Extension for BladeHtmlExtension {
         let binary = LspSettings::for_worktree(language_server_id.as_ref(), worktree)
             .ok()
             .and_then(|settings| settings.binary);
-        if let Some(binary) = binary
-            && let Some(path) = binary.path
-        {
-            return Ok(zed::Command {
-                command: path,
-                args: binary.arguments.unwrap_or_else(|| vec!["--stdio".into()]),
-                env: binary
-                    .env
-                    .map_or_else(Vec::new, |env| env.into_iter().collect()),
-            });
-        }
+        let env = binary
+            .as_ref()
+            .and_then(|b| b.env.clone())
+            .map_or_else(Vec::new, |env| env.into_iter().collect());
 
-        Ok(zed::Command {
-            command: zed::node_binary_path()?,
-            args: vec![self.server_script()?, "--stdio".into()],
-            env: Vec::default(),
-        })
+        match binary {
+            Some(CommandSettings {
+                path: Some(path),
+                arguments,
+                ..
+            }) => Ok(zed::Command {
+                command: path,
+                args: arguments.unwrap_or_else(|| vec!["--stdio".into()]),
+                env,
+            }),
+            Some(CommandSettings {
+                path: None,
+                arguments: Some(arguments),
+                ..
+            }) => Ok(zed::Command {
+                command: zed::node_binary_path()?,
+                args: arguments,
+                env,
+            }),
+            _ => Ok(zed::Command {
+                command: zed::node_binary_path()?,
+                args: vec![self.server_script(language_server_id)?, "--stdio".into()],
+                env,
+            }),
+        }
     }
 
     fn language_server_initialization_options(
@@ -105,33 +159,39 @@ impl zed::Extension for BladeHtmlExtension {
     }
 }
 
-/// `blade-html-server-<fnv1a64 of the content>.cjs`: a new bundle never reuses a stale file.
-fn server_file_name(source: &str) -> String {
-    format!(
-        "{SERVER_FILE_PREFIX}{:016x}.cjs",
-        fnv1a64(source.as_bytes())
-    )
+fn release_tag() -> String {
+    format!("v{VERSION}")
 }
 
-fn fnv1a64(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
-    })
+/// Per-version directory, so an extension update never runs an older server.
+fn server_dir() -> String {
+    format!("{SERVER_DIR_PREFIX}{VERSION}")
 }
 
-/// Removes server bundles of previous extension versions from the work directory.
-fn remove_stale_servers(current: &str) {
+fn find_server_asset(assets: &[GithubReleaseAsset]) -> Option<&GithubReleaseAsset> {
+    assets.iter().find(|asset| asset.name == SERVER_ASSET)
+}
+
+/// Servers of other versions in the work directory, including the bundles that 0.x development
+/// builds embedded (`blade-html-server-<hash>.cjs`).
+fn is_stale_server(entry: &str, current_dir: &str) -> bool {
+    (entry.starts_with(SERVER_DIR_PREFIX) && entry != current_dir)
+        || entry.starts_with("blade-html-server-")
+}
+
+fn remove_stale_servers(current_dir: &str) {
     let Ok(entries) = fs::read_dir(".") else {
         return;
     };
     for entry in entries.flatten() {
         let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if name.starts_with(SERVER_FILE_PREFIX)
-            && (name.ends_with(".js") || name.ends_with(".cjs"))
-            && name != current
-        {
-            let _ = fs::remove_file(entry.path());
+        if is_stale_server(&name.to_string_lossy(), current_dir) {
+            let path = entry.path();
+            let _ = if path.is_dir() {
+                fs::remove_dir_all(path)
+            } else {
+                fs::remove_file(path)
+            };
         }
     }
 }
@@ -142,32 +202,46 @@ zed::register_extension!(BladeHtmlExtension);
 mod tests {
     use super::*;
 
-    #[test]
-    fn fnv1a64_matches_reference_vectors() {
-        assert_eq!(fnv1a64(b""), 0xcbf2_9ce4_8422_2325);
-        assert_eq!(fnv1a64(b"a"), 0xaf63_dc4c_8601_ec8c);
-        assert_eq!(fnv1a64(b"foobar"), 0x8594_4171_f739_67e8);
+    fn asset(name: &str) -> GithubReleaseAsset {
+        GithubReleaseAsset {
+            name: name.into(),
+            download_url: format!("https://example.test/{name}"),
+        }
     }
 
     #[test]
-    fn server_file_name_depends_on_content() {
-        let a = server_file_name("console.log(1)");
-        let b = server_file_name("console.log(2)");
-        assert!(a.starts_with(SERVER_FILE_PREFIX));
+    fn release_tag_and_dir_follow_the_crate_version() {
+        assert_eq!(release_tag(), format!("v{}", env!("CARGO_PKG_VERSION")));
         assert_eq!(
-            std::path::Path::new(&a).extension(),
-            Some(std::ffi::OsStr::new("cjs"))
+            server_dir(),
+            format!("server-v{}", env!("CARGO_PKG_VERSION"))
         );
-        assert_ne!(a, b);
-        assert_eq!(a, server_file_name("console.log(1)"));
     }
 
     #[test]
-    fn embedded_server_is_the_bundle() {
-        assert!(
-            SERVER_SOURCE.len() > 10_000,
-            "server/dist is empty — run `make server`"
+    fn finds_the_server_asset_by_exact_name() {
+        let assets = [
+            asset("blade-html-server.cjs.sha256"),
+            asset("blade-html-server.cjs"),
+            asset("source.tar.gz"),
+        ];
+        assert_eq!(
+            find_server_asset(&assets).map(|a| a.download_url.as_str()),
+            Some("https://example.test/blade-html-server.cjs")
         );
-        assert!(SERVER_SOURCE.contains("blade-html"));
+        assert!(find_server_asset(&[asset("other.js")]).is_none());
+    }
+
+    #[test]
+    fn stale_servers_are_other_versions_and_embedded_bundles() {
+        let current = "server-v0.2.0";
+        assert!(!is_stale_server("server-v0.2.0", current));
+        assert!(is_stale_server("server-v0.1.0", current));
+        assert!(is_stale_server(
+            "blade-html-server-0123456789abcdef.cjs",
+            current
+        ));
+        assert!(!is_stale_server("node_modules", current));
+        assert!(!is_stale_server("settings.json", current));
     }
 }

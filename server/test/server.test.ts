@@ -63,6 +63,8 @@ describe('bundled server over stdio', () => {
       initializationOptions: null,
     });
     assert.equal(result.serverInfo.name, 'blade-html');
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(path.dirname(BUNDLE), '../package.json'), 'utf8'));
+    assert.equal(result.serverInfo.version, pkg.version, 'bundle reports the package version');
     capabilities = result.capabilities;
     client.notify('initialized', {});
     client.notify('textDocument/didOpen', { textDocument: { uri, languageId: 'blade', version: 1, text: VIEW } });
