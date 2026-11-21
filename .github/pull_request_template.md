@@ -16,7 +16,7 @@
 - [ ] `make check`
 - [ ] `make build`
 - [ ] Tried in Zed (`zed: install dev extension`): the Blade feature this changes works
-- [ ] `server/dist` rebuilt and committed: the server or its dependencies changed
+- [ ] Tried the local server build in Zed (`lsp.blade-html.binary.arguments`): the server changed
 - [ ] New tests fail without the fix
 
 <!-- Anything else you verified, and how. -->
