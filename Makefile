@@ -11,7 +11,13 @@
 SERVER := server
 WASM_TARGET := wasm32-wasip2
 
-.PHONY: setup fmt lint lint-rust lint-server lint-nix version-check version test test-rust test-server build server wasm check clean
+.DEFAULT_GOAL := help
+
+.PHONY: help setup fmt lint lint-rust lint-server lint-nix version-check version test test-rust test-server build server wasm check clean
+
+# `make` alone prints the list above instead of running the first target.
+help:
+	@sed -n '3,/^$$/{s/^# \{0,1\}//;p}' $(firstword $(MAKEFILE_LIST))
 
 setup:
 	rustup toolchain install
