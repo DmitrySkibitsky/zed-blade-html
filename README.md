@@ -23,8 +23,13 @@ directives.
 
 ## Install
 
-Install **Blade** and **Blade HTML** from `zed: extensions`. The extension needs no download: the
-server is embedded and runs on the Node.js that Zed manages.
+Install **Blade** and **Blade HTML LSP** from `zed: extensions`. On first use the extension
+downloads its language server (one JavaScript file from this repository's GitHub release of the
+same version) and runs it on the Node.js that Zed manages.
+
+Until the extension is listed in the registry, install it from a clone: `zed: install dev
+extension` and pick the cloned directory (Zed builds it with Rust, so `rustup` must be on Zed's
+`PATH`). The server is still downloaded from the release.
 
 The server is enabled for Blade by default. If your settings list Blade language servers
 explicitly, keep `"..."` in the list or add `"blade-html"`:
@@ -57,8 +62,8 @@ change.
       // Vue built-in directives and components: "auto" (project depends on vue), true or false
       "vue": "auto"
     },
-    // Optional: run another build of the server
-    "binary": { "path": "/path/to/node", "arguments": ["/path/to/blade-html-server.cjs", "--stdio"] }
+    // Optional: run another build of the server on Zed's Node.js (or set "path" for another binary)
+    "binary": { "arguments": ["/path/to/blade-html-server.cjs", "--stdio"] }
   }
 }
 ```

@@ -2,13 +2,14 @@
 
 ## Layout
 
-| Path             | What                                                                                    |
-| ---------------- | --------------------------------------------------------------------------------------- |
-| `extension.toml` | Zed manifest: registers the `blade-html` language server for the `Blade` language       |
-| `src/lib.rs`     | The extension (Rust → wasm32-wasip2): writes the embedded server bundle and starts it   |
-| `server/src/`    | The language server (TypeScript): Blade masking, web-types, HTML features               |
-| `server/test/`   | Unit tests (masking, web-types, features) and end-to-end tests on the bundle over stdio |
-| `server/dist/`   | The bundled server — **committed**: Zed builds extensions with `cargo` only             |
+| Path                  | What                                                                                    |
+| --------------------- | --------------------------------------------------------------------------------------- |
+| `extension.toml`      | Zed manifest (id `blade-html-lsp`): registers the `blade-html` server for `Blade`       |
+| `src/lib.rs`          | The extension (Rust → wasm32-wasip2): downloads the server of its version and starts it |
+| `server/src/`         | The language server (TypeScript): Blade masking, web-types, HTML features               |
+| `server/test/`        | Unit tests (masking, web-types, features) and end-to-end tests on the bundle over stdio |
+| `server/dist/`        | The bundle (`make server`), not committed: a GitHub release asset                       |
+| `scripts/version.mjs` | One version in extension.toml, Cargo.toml/.lock and server/package(-lock).json          |
 
 How it works: `server/src/blade.ts` replaces every Blade construct (`{{ }}`, `{!! !!}`, comments,
 directives with their arguments, `@php` blocks, `<?php ?>`) with spaces, keeping the length and
@@ -24,15 +25,29 @@ and the `wasm32-wasip2` target come from `rust-toolchain.toml`.
 ```sh
 make setup   # rustup toolchain + npm ci
 make fmt     # rustfmt, Biome (format, imports, safe fixes), nixfmt
-make lint    # formatting check, clippy (-D warnings), Biome lint, tsc, nixfmt --check
+make lint    # formatting check, clippy (-D warnings), Biome lint, tsc, nixfmt --check, versions
 make test    # cargo test + server unit and end-to-end tests
 make build   # server bundle + extension wasm
-make check   # what CI runs: lint, test, and server/dist matching the sources
+make check   # what CI runs: lint and test
 ```
 
-Try a change in Zed: `make server`, then `zed: install dev extension` and pick this directory
-(Zed needs `rustup` on its `PATH`). After later changes: `make server` and **Rebuild** in the
-extensions page. Server logs: `dev: open language server logs` → `blade-html`.
+### Trying a change in Zed
+
+`zed: install dev extension` and pick this directory (Zed needs `rustup` on its `PATH`). The
+extension downloads the server from the GitHub release of its version; to run your local build
+instead, `make server` and point Zed at it (user settings, absolute path):
+
+```jsonc
+"lsp": {
+  "blade-html": {
+    "binary": { "arguments": ["/path/to/zed-blade-html/server/dist/blade-html-server.cjs", "--stdio"] }
+  }
+}
+```
+
+After server changes: `make server` and `editor: restart language server`; after extension
+(Rust) changes: **Rebuild** in the extensions page. Server logs: `dev: open language server
+logs` → `blade-html`.
 
 ## Workflow
 
@@ -47,8 +62,30 @@ extensions page. Server logs: `dev: open language server logs` → `blade-html`.
 - `main` is protected by two rulesets: a pull request gets in only when the **CI result** check
   passed (linear history, no force pushes or deletion), and only the owner merges.
   Documentation-only changes skip the heavy CI job; CI result still reports.
-- Server changes are committed together with the rebuilt `server/dist` (`make server`);
-  `make check` fails when the bundle does not match the sources.
+
+## Releases
+
+The extension downloads the server from the GitHub release of its own version, so a version is
+released by a tag, never by hand:
+
+1. Pull request `chore(release): x.y.z` that only runs `make version VERSION=x.y.z` (all five
+   version files; `make check` fails while they differ). Merge it.
+2. Tag the merged commit on `main` and push the tag:
+   `git fetch origin && git tag vx.y.z origin/main && git push origin vx.y.z`.
+3. `.github/workflows/release.yml` checks the tag against the version files, runs the checks,
+   builds the bundle and creates the GitHub release with `blade-html-server.cjs` (+ `.sha256`).
+4. Zed registry ([zed-industries/extensions](https://github.com/zed-industries/extensions)):
+   - first version: a manual pull request that adds this repository as the submodule
+     `extensions/blade-html-lsp` (HTTPS URL) at the tagged commit, plus
+     `[blade-html-lsp] submodule = "extensions/blade-html-lsp"`, `version = "x.y.z"` in
+     `extensions.toml`, then `pnpm sort-extensions`;
+   - later versions: the release workflow opens that pull request itself
+     ([zed-extension-action](https://github.com/huacnlee/zed-extension-action)) once the
+     repository variable `ZED_REGISTRY_PUBLISHED` is `true` and the `COMMITTER_TOKEN` secret (classic
+     PAT, scopes `repo` + `workflow`) is set; it pushes to the owner's fork of
+     `zed-industries/extensions`.
+
+Versions follow semver; while on 0.x, a breaking change of settings bumps the minor version.
 
 ## Definition of done
 
