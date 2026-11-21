@@ -1,0 +1,12 @@
+# Rust / Zed build output
+/target/
+*.wasm
+/grammars/
+
+# Language server (server/dist is committed: Zed builds extensions with cargo only)
+node_modules/
+
+# Nix
+result
+result-*
+.direnv/

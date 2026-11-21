@@ -1,0 +1,16 @@
+id = "blade-html"
+name = "Blade HTML"
+version = "0.1.0"
+schema_version = 1
+authors = ["Dmitry Skibitsky"]
+description = "HTML tags and attributes, plus web-types (Vue components: completion, hover, go to definition) in Laravel Blade templates."
+repository = "https://github.com/DmitrySkibitsky/zed-blade-html"
+
+# Runs next to the servers the `blade` extension and others register for Blade (devsense,
+# laravel, emmet…): Zed merges completions, hovers and definitions from all of them.
+[language_servers.blade-html]
+name = "Blade HTML"
+languages = ["Blade"]
+
+[language_servers.blade-html.language_ids]
+Blade = "blade"
