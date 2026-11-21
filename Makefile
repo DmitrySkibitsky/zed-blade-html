@@ -1,16 +1,17 @@
 # Development tasks. Run inside the dev shell (`nix develop`, or automatically via direnv).
 #
-#   make setup    install toolchains/dependencies (rustup toolchain from rust-toolchain.toml, npm ci)
-#   make fmt      format everything (rustfmt, Biome, nixfmt)
-#   make lint     check formatting + linters + types (no changes)
-#   make test     Rust unit tests + server unit and end-to-end tests
-#   make build    language server bundle + extension wasm
-#   make check    everything CI runs: lint, test, committed bundle up to date
+#   make setup            install toolchains/dependencies (rustup toolchain from rust-toolchain.toml, npm ci)
+#   make fmt              format everything (rustfmt, Biome, nixfmt)
+#   make lint             check formatting + linters + types + versions (no changes)
+#   make test             Rust unit tests + server unit and end-to-end tests
+#   make build            server bundle (the release asset) + extension wasm
+#   make check            everything CI runs: lint and test
+#   make version VERSION=x.y.z   set the release version in every file (see CONTRIBUTING.md)
 
 SERVER := server
 WASM_TARGET := wasm32-wasip2
 
-.PHONY: setup fmt lint lint-rust lint-server lint-nix test test-rust test-server build server wasm dist-check check clean
+.PHONY: setup fmt lint lint-rust lint-server lint-nix version-check version test test-rust test-server build server wasm check clean
 
 setup:
 	rustup toolchain install
@@ -21,7 +22,7 @@ fmt:
 	biome check --write .
 	nixfmt flake.nix
 
-lint: lint-rust lint-server lint-nix
+lint: lint-rust lint-server lint-nix version-check
 
 lint-rust:
 	cargo fmt --check
@@ -35,33 +36,33 @@ lint-server:
 lint-nix:
 	nixfmt --check flake.nix
 
+# The extension downloads the server from the release of its own version: all files must agree.
+version-check:
+	node scripts/version.mjs check
+
+version:
+	@test -n "$(VERSION)" || { echo "usage: make version VERSION=x.y.z"; exit 1; }
+	node scripts/version.mjs set $(VERSION)
+
 test: test-rust test-server
 
-test-rust: server
+test-rust:
 	cargo test
 
 test-server:
 	cd $(SERVER) && npm test
 
+# server/dist/blade-html-server.cjs: attached to the GitHub release by .github/workflows/release.yml
 server:
 	cd $(SERVER) && npm run build
 
-wasm: server
+wasm:
 	cargo build --release --target $(WASM_TARGET)
 
-build: wasm
+build: server wasm
 
-# Zed builds the extension with cargo only, so the bundle the wasm embeds is committed:
-# a fresh build must match the committed (or staged) one.
-dist-check: server
-	@if ! git diff --quiet -- $(SERVER)/dist || [ -n "$$(git ls-files --others --exclude-standard -- $(SERVER)/dist)" ]; then \
-		echo "$(SERVER)/dist is out of date: run 'make server' and commit the bundle"; \
-		git status --short -- $(SERVER)/dist; \
-		exit 1; \
-	fi
-
-check: lint test dist-check
+check: lint test
 
 clean:
 	cargo clean
-	rm -rf $(SERVER)/node_modules
+	rm -rf $(SERVER)/node_modules $(SERVER)/dist

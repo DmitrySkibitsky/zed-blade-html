@@ -70,12 +70,12 @@ jobs:
           key: rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
       - name: Install toolchains and dependencies
         run: nix develop --command make setup
-      # Formatting (rustfmt, Biome, nixfmt), clippy, Biome lint, tsc, Rust and server tests
-      # (unit + end-to-end on the bundle), and the committed server/dist matching the sources.
+      # Formatting (rustfmt, Biome, nixfmt), clippy, Biome lint, tsc, version files in sync, Rust
+      # and server tests (unit + end-to-end on the bundle).
       - name: make check
         run: nix develop --command make check
-      # What Zed does on install: cargo build of the wasm with the committed bundle embedded.
-      - name: Build the extension
+      # The release asset (server bundle) and what Zed does on install (cargo build of the wasm).
+      - name: Build the server bundle and the extension
         run: nix develop --command make build
 
   # The one check the branch ruleset requires: jobs skipped for a documentation-only change still

@@ -3,8 +3,9 @@
 *.wasm
 /grammars/
 
-# Language server (server/dist is committed: Zed builds extensions with cargo only)
+# Language server (the bundle is a release asset, built by CI)
 node_modules/
+/server/dist/
 
 # Nix
 result
